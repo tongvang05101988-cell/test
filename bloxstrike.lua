@@ -400,7 +400,7 @@ local function syncPlayerFlagsFromList(playerlist)
 end
 
 Library.Brand = "methane"
-Library.GameName = "bloxstrike"
+Library.GameName = "bloxstrike [beta]"
 pcall(function() Library:EnsureConfigFolders() end)
 pcall(function() Library.Theme.Accent = Color3.fromRGB(152, 188, 255) end)
 
@@ -1161,7 +1161,7 @@ Options.RecoilControl = { Value = 100 }
 bindToggle(CombatGunMods, "AutoReload", "Auto Reload", false)
 bindToggle(CombatGunMods, "NoSpread", "No Spread", false)
 CombatGunMods:AddSlider({
-	Text = "Spread amount",
+	Text = "Spread control",
 	Flag = "SpreadControl",
 	Default = 100,
 	Min = 0,
@@ -5861,85 +5861,92 @@ local function installSkinChanger()
 end
 
 local _skinLast = { w = "", f = "", wear = -1, k = "", kf = "", kwear = -1, g = "", gf = "", gwear = -1 }
+local _skinReadLast = 0
 RunService.Heartbeat:Connect(function()
 	if not SkinChanger.Ready then return end
-	local w = tostring(ov("SkinWeapon", ""))
-	local f = tostring(ov("SkinFinish", "Original"))
-	local wear = ov("SkinWear", 0)
-	if type(wear) ~= "number" then wear = 0 end
-	local k = tostring(ov("SkinKnifeModel", "Original"))
-	local kf = tostring(ov("SkinKnifeFinish", "Original"))
-	local kwear = ov("SkinKnifeWear", 0)
-	if type(kwear) ~= "number" then kwear = 0 end
-	local g = tostring(ov("SkinGloveModel", "Original"))
-	local gf = tostring(ov("SkinGloveFinish", "Original"))
-	local gwear = ov("SkinGloveWear", 0)
-	if type(gwear) ~= "number" then gwear = 0 end
+	local _skinNow = os.clock()
+	-- Gate all 9 ov() dropdown reads to ~5Hz. At 60Hz this was 540 string
+	-- reads/s for values that only change when the user touches the UI.
+	if _skinNow - _skinReadLast >= 0.2 then
+		_skinReadLast = _skinNow
+		local w = tostring(ov("SkinWeapon", ""))
+		local f = tostring(ov("SkinFinish", "Original"))
+		local wear = ov("SkinWear", 0)
+		if type(wear) ~= "number" then wear = 0 end
+		local k = tostring(ov("SkinKnifeModel", "Original"))
+		local kf = tostring(ov("SkinKnifeFinish", "Original"))
+		local kwear = ov("SkinKnifeWear", 0)
+		if type(kwear) ~= "number" then kwear = 0 end
+		local g = tostring(ov("SkinGloveModel", "Original"))
+		local gf = tostring(ov("SkinGloveFinish", "Original"))
+		local gwear = ov("SkinGloveWear", 0)
+		if type(gwear) ~= "number" then gwear = 0 end
 
-	if w ~= _skinLast.w then
-		_skinLast.w = w
-		if not SkinChanger.Syncing then
-			SkinChanger:RefreshEditor()
-			SkinChanger.NextUpdate = 0
-		end
-	elseif f ~= _skinLast.f or math.abs(wear - _skinLast.wear) > 1e-4 then
-		_skinLast.f = f
-		_skinLast.wear = wear
-		if not SkinChanger.Syncing then
-			SkinChanger:storeSelection()
-		end
-	end
-
-	if k ~= _skinLast.k then
-		_skinLast.k = k
-		if not SkinChanger.Syncing then
-			if k == "Original" then
-				SkinChanger.Loadout.Knife = nil
-				SkinChanger:Store()
-			elseif SkinChanger.KnifeSet[k] then
-				local finishes = SkinChanger.Catalog[k]
-				local finish = finishes and (finishes.Stock and "Stock" or next(finishes))
-				SkinChanger.Loadout.Knife = { Weapon = k, Skin = finish, Float = 0 }
-				SkinChanger:Store()
+		if w ~= _skinLast.w then
+			_skinLast.w = w
+			if not SkinChanger.Syncing then
+				SkinChanger:RefreshEditor()
+				SkinChanger.NextUpdate = 0
 			end
-			SkinChanger:RefreshEditor()
+		elseif f ~= _skinLast.f or math.abs(wear - _skinLast.wear) > 1e-4 then
+			_skinLast.f = f
+			_skinLast.wear = wear
+			if not SkinChanger.Syncing then
+				SkinChanger:storeSelection()
+			end
 		end
-	elseif kf ~= _skinLast.kf or math.abs(kwear - _skinLast.kwear) > 1e-4 then
-		_skinLast.kf = kf
-		_skinLast.kwear = kwear
-		if not SkinChanger.Syncing then
-			SkinChanger:storeKnifeSelection()
-		end
-	end
 
-	if g ~= _skinLast.g then
-		_skinLast.g = g
-		if not SkinChanger.Syncing then
-			if g == "Original" then
-				SkinChanger.Loadout.Gloves = nil
-				SkinChanger:RestoreGloves()
-				SkinChanger:Store()
-			elseif SkinChanger.GloveSet[g] then
-				local finishes = SkinChanger.Catalog[g]
-				local finish = finishes and (finishes.Stock and "Stock" or next(finishes))
-				if type(finish) == "string" then
-					SkinChanger.Loadout.Gloves = { Weapon = g, Skin = finish, Float = 0 }
+		if k ~= _skinLast.k then
+			_skinLast.k = k
+			if not SkinChanger.Syncing then
+				if k == "Original" then
+					SkinChanger.Loadout.Knife = nil
+					SkinChanger:Store()
+				elseif SkinChanger.KnifeSet[k] then
+					local finishes = SkinChanger.Catalog[k]
+					local finish = finishes and (finishes.Stock and "Stock" or next(finishes))
+					SkinChanger.Loadout.Knife = { Weapon = k, Skin = finish, Float = 0 }
 					SkinChanger:Store()
 				end
+				SkinChanger:RefreshEditor()
 			end
-			SkinChanger:RefreshEditor()
-			SkinChanger.NextUpdate = 0
+		elseif kf ~= _skinLast.kf or math.abs(kwear - _skinLast.kwear) > 1e-4 then
+			_skinLast.kf = kf
+			_skinLast.kwear = kwear
+			if not SkinChanger.Syncing then
+				SkinChanger:storeKnifeSelection()
+			end
 		end
-	elseif gf ~= _skinLast.gf or math.abs(gwear - _skinLast.gwear) > 1e-4 then
-		_skinLast.gf = gf
-		_skinLast.gwear = gwear
-		if not SkinChanger.Syncing then
-			SkinChanger:storeGloveSelection()
+
+		if g ~= _skinLast.g then
+			_skinLast.g = g
+			if not SkinChanger.Syncing then
+				if g == "Original" then
+					SkinChanger.Loadout.Gloves = nil
+					SkinChanger:RestoreGloves()
+					SkinChanger:Store()
+				elseif SkinChanger.GloveSet[g] then
+					local finishes = SkinChanger.Catalog[g]
+					local finish = finishes and (finishes.Stock and "Stock" or next(finishes))
+					if type(finish) == "string" then
+						SkinChanger.Loadout.Gloves = { Weapon = g, Skin = finish, Float = 0 }
+						SkinChanger:Store()
+					end
+				end
+				SkinChanger:RefreshEditor()
+				SkinChanger.NextUpdate = 0
+			end
+		elseif gf ~= _skinLast.gf or math.abs(gwear - _skinLast.gwear) > 1e-4 then
+			_skinLast.gf = gf
+			_skinLast.gwear = gwear
+			if not SkinChanger.Syncing then
+				SkinChanger:storeGloveSelection()
+			end
 		end
 	end
 
-	if SkinChanger.Updating or os.clock() < SkinChanger.NextUpdate then return end
-	SkinChanger.NextUpdate = os.clock() + 0.2
+	if SkinChanger.Updating or _skinNow < SkinChanger.NextUpdate then return end
+	SkinChanger.NextUpdate = _skinNow + 0.2
 	SkinChanger.Updating = true
 	local success, err = pcall(function() SkinChanger:Update() end)
 	SkinChanger.Updating = false
@@ -7030,26 +7037,30 @@ RunService.RenderStepped:Connect(function()
 	local center = cam.ViewportSize / 2
 	local sShow = tv("SilentAim") and tv("SilentUseFovCircle")
 	local aShow = tv("Aimbot") and tv("AimbotUseFovCircle")
-	local sR = ov("SilentFovCircleRadius", 50)
-	local aR = ov("AimbotFovCircleRadius", 50)
-	local sCol = ov("SilentFovColor", Color3.fromRGB(255, 255, 255))
-	local aCol = ov("AimbotFovColor", Color3.fromRGB(255, 255, 255))
-	if typeof(sCol) ~= "Color3" then sCol = Color3.fromRGB(255, 255, 255) end
-	if typeof(aCol) ~= "Color3" then aCol = Color3.fromRGB(255, 255, 255) end
 
-	SilentFovOl.Position = center
-	SilentFovCircle.Position = center
-	SilentFovOl.Radius = sR
-	SilentFovCircle.Radius = sR
-	SilentFovCircle.Color = sCol
+	if sShow or aShow then
+		-- only read radius/colour when at least one circle is visible
+		local sR = ov("SilentFovCircleRadius", 50)
+		local aR = ov("AimbotFovCircleRadius", 50)
+		local sCol = ov("SilentFovColor", Color3.fromRGB(255, 255, 255))
+		local aCol = ov("AimbotFovColor", Color3.fromRGB(255, 255, 255))
+		if typeof(sCol) ~= "Color3" then sCol = Color3.fromRGB(255, 255, 255) end
+		if typeof(aCol) ~= "Color3" then aCol = Color3.fromRGB(255, 255, 255) end
+
+		SilentFovOl.Position = center
+		SilentFovCircle.Position = center
+		SilentFovOl.Radius = sR
+		SilentFovCircle.Radius = sR
+		SilentFovCircle.Color = sCol
+		AimbotFovOl.Position = center
+		AimbotFovCircle.Position = center
+		AimbotFovOl.Radius = aR
+		AimbotFovCircle.Radius = aR
+		AimbotFovCircle.Color = aCol
+	end
+
 	SilentFovOl.Visible = sShow
 	SilentFovCircle.Visible = sShow
-
-	AimbotFovOl.Position = center
-	AimbotFovCircle.Position = center
-	AimbotFovOl.Radius = aR
-	AimbotFovCircle.Radius = aR
-	AimbotFovCircle.Color = aCol
 	AimbotFovOl.Visible = aShow
 	AimbotFovCircle.Visible = aShow
 
@@ -10733,10 +10744,15 @@ task.spawn(function()
 		end
 		module.simulate = Grenades.Wrapper
 		Grenades.Ready = true
+		local _syncLast = 0
 		RunService.Heartbeat:Connect(function()
-			syncSettings()
+			local _now = os.clock()
+			if _now - _syncLast >= 0.12 then
+				_syncLast = _now
+				syncSettings()
+			end
 			local success, err = pcall(function()
-				Grenades:Update(os.clock())
+				Grenades:Update(_now)
 			end)
 			if not success then
 				Grenades.LastError = tostring(err)
