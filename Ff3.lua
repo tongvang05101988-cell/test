@@ -3194,9 +3194,12 @@ do
             end
 
             -- CFrame: boost 1-5 maps to 11-15, heartbeat-synced position step
+            -- CFrame.new(step) preserves rotation — adding Vector3 directly zeros it every frame
             local cfSpeedSPS = 11 + ((boost - 1) / 4) * 4
             local step = direction.Unit * (cfSpeedSPS * dt)
-            root.CFrame = root.CFrame + step
+            root.CFrame = root.CFrame * CFrame.new(
+                root.CFrame:VectorToObjectSpace(step)
+            )
 
             if humanoid:GetState() == Enum.HumanoidStateType.Running then
                 local scale = cfSpeedSPS / math.max(humanoid.WalkSpeed, 1)
