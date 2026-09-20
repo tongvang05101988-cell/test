@@ -3102,6 +3102,7 @@ function ESPF.makeEntry()
 		tr_ol = ESPF.newDraw("Line"), tr = ESPF.newDraw("Line"),
 		-- weapon icon (ScreenGui ImageLabel; created on first use)
 		wicon_img = nil,
+		wicon_shadow = nil,
 		_wicon_cached_name = nil, -- avoid redundant resolveItemIcon calls
 	}
 	for i = 1, BOX_EDGE_N do
@@ -3175,8 +3176,9 @@ function ESPF.hideEntry(e)
 	h(e.name); h(e.dist); h(e.weapon)
 	for _, rf in pairs(e.right_flags or {}) do h(rf) end
 	h(e.tr); h(e.tr_ol)
-	-- weapon icon
-	pcall(function() if e.wicon_img then e.wicon_img.Visible = false end end)
+	-- weapon icon + shadow
+	pcall(function() if e.wicon_img    then e.wicon_img.Visible    = false end end)
+	pcall(function() if e.wicon_shadow then e.wicon_shadow.Visible = false end end)
 end
 
 function ESPF.clearAllEntries()
@@ -8925,6 +8927,16 @@ function WESP.wespEnsure(model, kind)
 		pcall(function() e.name.Font = 2 end)
 	end
 	WorldESP.entries[model] = e
+	-- destroy ESP elements the frame the weapon leaves Workspace (picked up / removed)
+	pcall(function()
+		model.AncestryChanged:Connect(function(_, newParent)
+			if not newParent or not newParent:IsDescendantOf(game.Workspace) then
+				WESP.wespDestroy(model)
+				wespGuns[model]  = nil
+				wespBombs[model] = nil
+			end
+		end)
+	end)
 	return e
 end
 
