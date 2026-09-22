@@ -3329,35 +3329,7 @@ WorldToViewportPoint = LPH_NO_VIRTUALIZE(function(worldPos, ...)
     end)
 
 
-    -- Autoload config (same pattern as Bloxstrike)
-    task.spawn(function()
-        task.wait(0.75)
-        pcall(function()
-            if not Library or not Library.LoadConfig then return end
-            pcall(function() Library:EnsureConfigFolders() end)
-            local folder = tostring(Library.Directory or "MethaneUI")
-                .. tostring(Library.Folders and Library.Folders.Configs or "/methane/cfgs/operationone")
-            if not folder:find("/$") and not folder:find("\$") then
-                folder = folder .. "/"
-            end
-            if not isfile or not isfile(folder .. "autoload.txt") then return end
-            local name = tostring(readfile(folder .. "autoload.txt") or ""):gsub("%s+$", "")
-            if name == "" then return end
-            local cfgPath = folder .. name
-            if not name:find("%.json$") then cfgPath = folder .. name .. ".json" end
-            if not isfile(cfgPath) then return end
-            local content = readfile(cfgPath)
-            if type(content) ~= "string" or content == "" then return end
-            local ok = Library:LoadConfig(content)
-            if ok then
-                pcall(function()
-                    if Library.Notification then
-                        Library:Notification("Autoloaded: " .. name, 3, ACCENT)
-                    end
-                end)
-            end
-        end)
-    end)
+
 
 local settings = {
         SilentEnabled = false,
@@ -12494,6 +12466,149 @@ Library:OnUnload(function()
     --
 
     --
+
+
+    -- ==================== CONFIG AUTOLOAD (runs after ALL flags registered) ====================
+    task.spawn(function()
+        local function cfgFolder()
+            pcall(function()
+                if Library then
+                    Library.Brand = "methane"
+                    Library.GameName = "operationone"
+                    if Library.EnsureConfigFolders then
+                        Library:EnsureConfigFolders()
+                    end
+                end
+            end)
+            local dir = (Library and Library.Directory) or "MethaneUI"
+            local cfgs = (Library and Library.Folders and Library.Folders.Configs) or "/methane/cfgs/operationone"
+            local folder = tostring(dir) .. tostring(cfgs)
+            if folder:sub(-1) ~= "/" and folder:sub(-1) ~= "\\" then
+                folder = folder .. "/"
+            end
+            return folder
+        end
+
+        local function applyConfigContent(content)
+            if type(content) ~= "string" or content == "" then
+                return false, "empty"
+            end
+            -- Prefer library LoadConfig
+            local okLib, resLib = pcall(function()
+                return Library:LoadConfig(content)
+            end)
+            if okLib and resLib ~= false then
+                return true, "library"
+            end
+            -- Fallback: apply SetFlags manually (NH LoadConfig can fail on sparse flags)
+            local decoded
+            local okDec, decOrErr = pcall(function()
+                return game:GetService("HttpService"):JSONDecode(content)
+            end)
+            if not okDec or type(decOrErr) ~= "table" then
+                return false, "json"
+            end
+            decoded = decOrErr
+            local flagData = decoded.Flags or decoded
+            if type(flagData) ~= "table" then
+                return false, "flags"
+            end
+            local setFlags = Library and Library.SetFlags
+            if type(setFlags) ~= "table" then
+                return false, "nofuncs"
+            end
+            local applied = 0
+            for index, value in pairs(flagData) do
+                local setFn = setFlags[index]
+                if type(setFn) == "function" then
+                    local okSet = pcall(function()
+                        if type(value) == "table" and value.Key then
+                            setFn(value)
+                        elseif type(value) == "table" and value.Color then
+                            setFn(value.Color, value.Alpha)
+                        else
+                            setFn(value)
+                        end
+                    end)
+                    if okSet then applied = applied + 1 end
+                end
+            end
+            return applied > 0, "manual:" .. tostring(applied)
+        end
+
+        local function tryOnce()
+            if not Library then return false, "nolib" end
+            if type(isfile) ~= "function" or type(readfile) ~= "function" then
+                return false, "nofile"
+            end
+            local folder = cfgFolder()
+            local autoPath = folder .. "autoload.txt"
+            if not isfile(autoPath) then
+                return false, "noauto"
+            end
+            local name = tostring(readfile(autoPath) or ""):gsub("%s+$", ""):gsub("^%s+", "")
+            if name == "" then
+                return false, "emptyname"
+            end
+            -- strip accidental .json in autoload name for path build
+            local base = name:gsub("%.json$", "")
+            local candidates = {
+                folder .. name,
+                folder .. base .. ".json",
+                folder .. name .. ".json",
+            }
+            local content, used
+            for _, path in ipairs(candidates) do
+                if isfile(path) then
+                    local okR, data = pcall(readfile, path)
+                    if okR and type(data) == "string" and #data > 2 then
+                        content = data
+                        used = path
+                        break
+                    end
+                end
+            end
+            if not content then
+                return false, "nocfg:" .. name
+            end
+            local ok, how = applyConfigContent(content)
+            if ok then
+                pcall(function()
+                    local accent = (ACCENT) or Color3.fromRGB(152, 188, 255)
+                    if Library.Notification then
+                        Library:Notification("Autoloaded: " .. base, 3, accent)
+                    end
+                end)
+                return true, how
+            end
+            return false, tostring(how)
+        end
+
+        -- Wait until SetFlags are populated (UI finished), then retry
+        for attempt = 1, 12 do
+            task.wait(attempt == 1 and 1.0 or 0.5)
+            local nFlags = 0
+            pcall(function()
+                if Library and Library.SetFlags then
+                    for _ in pairs(Library.SetFlags) do
+                        nFlags = nFlags + 1
+                    end
+                end
+            end)
+            if nFlags < 5 and attempt < 8 then
+                continue
+            end
+            local ok, reason = tryOnce()
+            if ok then
+                return
+            end
+            -- keep trying; noauto means nothing selected
+            if reason == "noauto" or reason == "emptyname" then
+                return
+            end
+        end
+    end)
+
 
     -- watermark / keybinds already set up via Library:Watermark + Library:KeybindList
 
