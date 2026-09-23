@@ -1,770 +1,8 @@
 --[[
-  FF3 anticheat bypass — runs first, isolated so return/kick paths cannot stop Methane
-]]
-pcall(function()
-	local src = [[
--- Last updated: 05-02-2026
--- might not be fully working should be tho xd uwu ;3 femboyy
-
-    local ErrorCodes = {
-        UNSUPPORTED_EXPLOIT = "E-1",
-        UNSUPPORTED_GAME = "E-2",
-        HOOKING_ERROR = "E-3",
-        PATCHING_ERROR = "E-4",
-        REFLECTION_ERROR = "E-5",
-        BAN_AVOID = "E-6", 
-        GRAVITY_TAMPER = "E-7",  
-        PREEMPTIVE_KICK = "E-8",
-        UNKNOWN_ERROR = "E-99"
-    }
- 
-    local function handleError(errorCode)
-        local players = game:GetService("Players")
-        local local_player = players and players.LocalPlayer
- 
-        if local_player then
-            local_player:Kick("ERROR: " .. errorCode .. "\nPlease make a ticket on Discord")
-        end
- 
-        return false
-    end
- 
-    if not hookfunction or not hookmetamethod or not firetouchinterest then
-        return handleError(ErrorCodes.UNSUPPORTED_EXPLOIT)
-    end
- 
- 
-    if not LPH_OBFUSCATED then
-        getfenv().LPH_NO_VIRTUALIZE = function(...)
-            return ...
-        end
-    end
- 
- 
-    local success, result = pcall(function()
-        return {
-            content_provider = game:GetService("ContentProvider"),
-            log_service = game:GetService("LogService"),
-            script_context = game:GetService("ScriptContext"),
-            core_gui = game:GetService("CoreGui"),
-            starter_player = game:GetService("StarterPlayer"),
-            players = game:GetService("Players"),
-            run_service = game:GetService("RunService"),
-            http_service = game:GetService("HttpService"),
-            workspace = game:GetService("Workspace"),
-            is_a = game.IsA
-        }
-    end)
- 
-    if not success then
-        return handleError(ErrorCodes.UNKNOWN_ERROR)
-    end
- 
-    local content_provider = result.content_provider
-    local log_service = result.log_service
-    local script_context = result.script_context
-    local core_gui = result.core_gui
-    local starter_player = result.starter_player
-    local players = result.players
-    local run_service = result.run_service
-    local http_service = result.http_service
-    local workspace = result.workspace
-    local is_a = result.is_a
- 
- 
-    local default_gravity = workspace.Gravity
- 
-    local fake_instance = Instance.new("Part")
-    local fake_signal = fake_instance:GetAttributeChangedSignal("FAKE_SIGNAL_")
-    local core_gui_instances_cache = {}
- 
-    for _, instance in next, core_gui:GetChildren() do
-        if instance.Name == "RobloxGui" then
-            continue
-        end
-        core_gui_instances_cache[#core_gui_instances_cache + 1] = instance
-    end
- 
-    local default_walkspeed = starter_player.CharacterWalkSpeed
-    local default_jump_power = starter_player.CharacterJumpPower
- 
- 
-    local function monitorWalkspeed()
-        local local_player = players.LocalPlayer
-        if not local_player or not local_player.Character or not local_player.Character:FindFirstChild("Humanoid") then
-            return
-        end
- 
-        local humanoid = local_player.Character.Humanoid
-        if humanoid.WalkSpeed > 23 then
-            handleError(ErrorCodes.BAN_AVOID)
-        end
-    end
- 
- 
-    local function monitorGravity()
-        if workspace.Gravity ~= default_gravity then
- 
-            workspace.Gravity = default_gravity
-            handleError(ErrorCodes.GRAVITY_TAMPER)
-        end
-    end
- 
- 
-    local walkspeed_connection = nil
-    local function setupWalkspeedMonitor()
-        local local_player = players.LocalPlayer
-        if not local_player then return end
- 
- 
-        local character_added_connection = nil
-        character_added_connection = local_player.CharacterAdded:Connect(function(character)
-            if character:WaitForChild("Humanoid") then
-                if walkspeed_connection then walkspeed_connection:Disconnect() end
-                walkspeed_connection = character.Humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(monitorWalkspeed)
- 
-                monitorWalkspeed()
-            end
-        end)
- 
- 
-        if local_player.Character and local_player.Character:FindFirstChild("Humanoid") then
-            walkspeed_connection = local_player.Character.Humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(monitorWalkspeed)
- 
-            monitorWalkspeed()
-        end
-    end
- 
- 
-    local gravity_connection = workspace:GetPropertyChangedSignal("Gravity"):Connect(monitorGravity)
- 
-    monitorGravity()
- 
- 
-    setupWalkspeedMonitor()
- 
-    local fake_request_internal = newcclosure(function()
-        error("The current thread cannot call 'RequestInternal' (lacking capability RobloxScript)")
-    end)
- 
-    local cached_namecall_function = nil
- 
-    xpcall(function()
-        game:_()
-    end, function()
-        cached_namecall_function = debug.info(2, "f")
-    end)
- 
-    if not cached_namecall_function then
-        return handleError(ErrorCodes.HOOKING_ERROR)
-    end
- 
-    local reflection_map = {}
-    local default_index_map = {}
- 
-    local orig_debug_info = nil
-    local orig_is_a = nil
-    local orig_get_property_changed_signal = nil
-    local orig_preload_async = nil
-    local orig_log_service = nil
-    local orig_game_namecall = nil
-    local orig_game_index = nil
-    local orig_game_newindex = nil
- 
-    local table_shallow_clone = LPH_NO_VIRTUALIZE(function(tbl)
-        local new_tbl = {}
-        for idx, value in next, tbl do
-            new_tbl[idx] = value
-        end
-        return new_tbl
-    end)
- 
-    local function patch_content_id_list(content_id_list)
-        if typeof(content_id_list) ~= "table" then
-            error("list is not a table")
-        end
- 
-        local core_gui_pos = table.find(content_id_list, core_gui)
- 
-        if not core_gui_pos then
-            error("no core-gui was found in this list")
-        end
- 
-        local contend_id_list_clone = table_shallow_clone(content_id_list)
-        contend_id_list_clone[core_gui_pos] = nil
- 
-        local add_core_gui_cache = LPH_NO_VIRTUALIZE(function()
-            for _, instance in next, core_gui_instances_cache do
-                table.insert(contend_id_list_clone, instance)
-            end
-        end)
- 
-        add_core_gui_cache()
- 
-        return contend_id_list_clone
-    end
- 
-    local function patch_preload_async_args(args, content_id_list_pos)
-        local content_id_list = args[content_id_list_pos]
-        args[content_id_list_pos] = patch_content_id_list(content_id_list)
-    end
- 
-    local function patch_is_a_ret(args, is_a_ret)
-        local self = args[1]
-        local class_name = args[2]
- 
-        if typeof(self) ~= "Instance" then
-            error("self is not an instance")
-        end
- 
-        if typeof(class_name) ~= "string" then
-            error("class name is not an instance")
-        end
- 
-        local stripped_class_name = string.gsub(class_name, "\0", "")
- 
-        if self.Name:sub(1, 2) ~= "FF" and stripped_class_name == "BodyMover" then
-            return false
-        end
- 
-        return is_a_ret
-    end
- 
-    local any_anticheat_caller = LPH_NO_VIRTUALIZE(function()
-        for idx = 1, math.huge do
-            if not debug.isvalidlevel(idx) then
-                break
-            end
- 
-            local caller_script_info = debug.getinfo(idx)
-            if not caller_script_info then
-                break
-            end
- 
-            if isexecutorclosure(caller_script_info.func) then
-                continue
-            end
- 
-            local short_src = caller_script_info.short_src
- 
-            if typeof(short_src) ~= "string" then
-                continue
-            end
- 
-            if
-                not short_src:match("ClientMain")
-                or (not short_src:match("ReplicatedFirst") and not short_src:match("PlayerModule"))
-            then
-                continue
-            end
- 
-            return true
-        end
- 
-        return false
-    end)
- 
-    local patch_log_service_return = LPH_NO_VIRTUALIZE(function(log_service_ret)
-        if typeof(log_service_ret) ~= "table" then
-            error("returned value is not a table")
-        end
- 
-        local new_log_service_ret = {}
-        local patched_log_history = false
- 
-        for _, log_service_entry in next, log_service_ret do
-            local log_message = log_service_entry.message
-            if not log_message then
-                continue
-            end
- 
-            local has_script = log_message:find("Script ''", 2, true)
-            local has_line_info = log_message:find("\n, line ", 1, true)
-            local has_string_info = log_message:find('[string "', 1, true)
-            local has_block_part = log_message:find("BlockPart")
-            local log_entry_ok = false
- 
-            if not (has_script or has_line_info or has_string_info or has_block_part) then
-                log_entry_ok = true
-            end
- 
-            if log_entry_ok then
-                table.insert(new_log_service_ret, log_service_entry)
-                continue
-            end
- 
-            patched_log_history = true
-        end
- 
-        if #new_log_service_ret == 0 then
-            error("no valid log entries")
-        end
- 
-        if not patched_log_history then
-            error("nothing to patch")
-        end
- 
-        return new_log_service_ret
-    end)
- 
-    local on_log_service = LPH_NO_VIRTUALIZE(function(...)
-        local log_service_ret = orig_log_service(...)
- 
-        if checkcaller() then
-            return log_service_ret
-        end
- 
-        local patch_success, patch_result = pcall(patch_log_service_return, log_service_ret)
- 
-        if not patch_success then
-            return log_service_ret
-        else
-            return patch_result
-        end
-    end)
- 
-    local on_preload_async = LPH_NO_VIRTUALIZE(function(...)
-        if checkcaller() then
-            return orig_preload_async(...)
-        end
- 
-        local args = { ... }
-        local patch_success, patch_result = pcall(patch_preload_async_args, args, 2)
- 
-        if not patch_success then
-            return orig_preload_async(...)
-        else
-            return orig_preload_async(table.unpack(args))
-        end
-    end)
- 
-    local on_game_namecall = LPH_NO_VIRTUALIZE(function(...)
-        if checkcaller() then
-            return orig_game_namecall(...)
-        end
- 
-        local args = { ... }
-        local self = args[1]
- 
-        if typeof(self) ~= "Instance" then
-            return orig_game_namecall(...)
-        end
- 
-        local method = getnamecallmethod()
- 
- 
-        if method == "Kick" then
- 
-            local kick_reason = "Unknown reason"
-            if args[2] and typeof(args[2]) == "string" then
-                kick_reason = args[2]
-            end
- 
- 
-            local local_player = players.LocalPlayer
-            if local_player then
-                local_player:Kick("PREEMPTIVE KICK (L-7)\nOriginal reason: " .. kick_reason .. "\nPlease make a ticket in Limitless Discord")
-            end
- 
- 
-            return
-        end
- 
-        if
-            self == run_service
-            and (method == "bindToRenderStep" or method == "BindToRenderStep")
-            and any_anticheat_caller()
-            and typeof(args[2]) == "string"
-        then
-            return
-        end
- 
-        if
-            orig_is_a(self, "RemoteEvent")
-            and (method == "fireServer" or method == "FireServer")
-            and typeof(args[2]) == "string"
-            and typeof(args[3]) == "string"
-            and args[3]:match("error")
-        then
-            return
-        end
- 
-        if self == content_provider and (method == "preloadAsync" or method == "PreloadAsync") then
-            local patch_success, patch_result = pcall(patch_preload_async_args, args, 2)
- 
-            if not patch_success then
-                return orig_game_namecall(...)
-            else
-                return orig_game_namecall(table.unpack(args))
-            end
-        elseif self == log_service and (method == "GetLogHistory" or method == "getLogHistory") then
-            local log_service_ret = orig_game_namecall(...)
-            local patch_success, patch_result = pcall(patch_log_service_return, log_service_ret)
- 
-            if not patch_success then
-                return log_service_ret
-            else
-                return patch_result
-            end
-        elseif method == "IsA" or method == "isA" then
-            local is_a_ret = orig_game_namecall(...)
-            local patch_success, patch_result = pcall(patch_is_a_ret, args, is_a_ret)
- 
-            if not patch_success then
-                return is_a_ret
-            else
-                return patch_result
-            end
-        end
- 
-        return orig_game_namecall(...)
-    end)
- 
-    local on_game_newindex = LPH_NO_VIRTUALIZE(function(...)
-        if checkcaller() then
-            return orig_game_newindex(...)
-        end
- 
-        local args = { ... }
-        local self = args[1]
-        local index = args[2]
-        local new_value = args[3]
- 
-        if typeof(self) ~= "Instance" then
-            return orig_game_newindex(...)
-        end
- 
-        if typeof(index) ~= "string" then
-            return orig_game_newindex(...)
-        end
- 
-        local stripped_index = string.gsub(index, "\0", "")
-        local property_reflection = reflection_map[self] or {}
- 
-        if not reflection_map[self] then
-            reflection_map[self] = property_reflection
-        end
- 
-        local numeric_change = typeof(new_value) == "number"
-        local velocity_change = typeof(new_value) == "Vector3"
- 
-        local is_assembly_angular_velocity = (
-            stripped_index == "AssemblyAngularVelocity" or stripped_index == "AssemblyAngularVelocity"
-        )
-        local is_walk_speed = (stripped_index == "WalkSpeed" or stripped_index == "walkSpeed")
-        local is_jump_power = (stripped_index == "JumpPower" or stripped_index == "jumpPower")
-        local is_assembly_linear_velocity = (
-            stripped_index == "AssemblyLinearVelocity" or stripped_index == "assemblyLinearVelocity"
-        )
-        local is_gravity = (stripped_index == "Gravity" or stripped_index == "gravity")
- 
- 
-        if numeric_change and is_walk_speed and new_value > 23 then
-            handleError(ErrorCodes.BAN_AVOID)
-            return
-        end
- 
- 
-        if numeric_change and is_gravity and self == workspace and new_value ~= default_gravity then
-            handleError(ErrorCodes.GRAVITY_TAMPER)
-            return
-        end
- 
-        if numeric_change and is_walk_speed then
-            new_value = math.max(new_value, 0.0)
-        end
- 
-        property_reflection[stripped_index] = new_value
-        orig_game_newindex(...)
-    end)
- 
-    local on_is_a = LPH_NO_VIRTUALIZE(function(...)
-        local is_a_ret = orig_is_a(...)
- 
-        if checkcaller() then
-            return is_a_ret
-        end
- 
-        local args = { ... }
-        local patch_success, patch_result = pcall(patch_is_a_ret, args, is_a_ret)
- 
-        if not patch_success then
-            return is_a_ret
-        else
-            return patch_result
-        end
-    end)
- 
-    local on_get_property_changed_signal = LPH_NO_VIRTUALIZE(function(...)
-        if checkcaller() then
-            return orig_get_property_changed_signal(...)
-        end
- 
-        local args = { ... }
-        local self = args[1]
-        local property = args[2]
- 
-        if typeof(self) ~= "Instance" then
-            return orig_get_property_changed_signal(...)
-        end
- 
-        if typeof(property) ~= "string" then
-            return orig_get_property_changed_signal(...)
-        end
- 
-        if orig_is_a(self, "Workspace") then
-            return fake_signal
-        end
- 
-        if self.Name == "HumanoidRootPart" and orig_is_a(self, "Part") then
-            return fake_signal
-        end
- 
-        local is_catch_part = self.Name:sub(1, 5) == "Catch"
-        local is_block_part = self.Name:sub(1, 5) == "BlokP"
- 
-        if (self.Name == "Football" or is_catch_part or is_block_part) and orig_is_a(self, "BasePart") then
-            return fake_signal
-        end
- 
-        return orig_get_property_changed_signal(...)
-    end)
- 
-    local on_game_index = LPH_NO_VIRTUALIZE(function(...)
-        if checkcaller() then
-            return orig_game_index(...)
-        end
- 
-        local args = { ... }
-        local self = args[1]
-        local index = args[2]
- 
-        if typeof(self) ~= "Instance" then
-            return orig_game_index(...)
-        end
- 
-        if typeof(index) ~= "string" then
-            return orig_game_index(...)
-        end
- 
-        local stripped_index = string.gsub(index, "\0", "")
- 
-        if self == script_context and stripped_index == "Error" then
-            return fake_signal
-        end
- 
-        if self == run_service and stripped_index == "Heartbeat" and any_anticheat_caller() then
-            return fake_signal
-        end
- 
-        if self == http_service and (stripped_index == "RequestInternal" or stripped_index == "requestInternal") then
-            return fake_request_internal
-        end
- 
-        local should_spoof_ret = false
- 
-        if orig_is_a(self, "Workspace") and (stripped_index == "Gravity" or stripped_index == "gravity") then
-            should_spoof_ret = true
-        end
- 
-        if
-            orig_is_a(self, "Part")
-            and (
-                stripped_index == "Size"
-                    or stripped_index == "size"
-                    or stripped_index == "CanCollide"
-                    or stripped_index == "canCollide"
-            )
-        then
-            should_spoof_ret = true
-        end
- 
-        if orig_is_a(self, "Humanoid") and (stripped_index ~= "MoveDirection") then
-            should_spoof_ret = true
-        end
- 
-        local reflections = reflection_map[self]
-        local reflection = reflections and reflections[stripped_index] or nil
- 
-        if should_spoof_ret and reflection then
-            return reflection
-        end
- 
-        local default_indexes = default_index_map[self] or {}
- 
-        if not default_index_map[self] then
-            default_index_map[self] = {}
-        end
- 
-        if should_spoof_ret then
-            local default_index = default_indexes[stripped_index] or orig_game_index(...)
- 
-            if not default_indexes[stripped_index] then
-                default_indexes[stripped_index] = default_index
-            end
-            if stripped_index == "Gravity" or stripped_index == "gravity" then
-                default_index = default_gravity
-            end
- 
-            if stripped_index == "WalkSpeed" or stripped_index == "walkSpeed" then
-                default_index = math.min(default_index, math.min(default_walkspeed, 23))
-            end
- 
-            if stripped_index == "JumpPower" or stripped_index == "jumpPower" then
-                default_index = math.min(default_index, default_jump_power)
-            end
- 
-            if stripped_index == "HipHeight" or stripped_index == "hipHeight" then
-                default_index = math.min(default_index, 0.0)
-            end
- 
-            local name = orig_game_index(self, "Name")
- 
-            if stripped_index == "Size" or stripped_index == "size" then
-                if name:sub(1, 5) == "Catch" then
-                    default_index = Vector3.new(
-                        math.min(default_index.X, 1.4),
-                        math.min(default_index.Y, 1.65),
-                        math.min(default_index.Z, 1.4)
-                    )
-                end
- 
-                if name:sub(1, 5) == "BlokP" then
-                    default_index = Vector3.new(
-                        math.min(default_index.X, 0.75),
-                        math.min(default_index.Y, 5),
-                        math.min(default_index.Z, 1.5)
-                    )
-                end
-            end
- 
-            return default_index
-        end
- 
-        return orig_game_index(...)
-    end)
- 
-    local on_debug_info = LPH_NO_VIRTUALIZE(function(...)
-        local args = { ... }
-        local info_ret = table.pack(orig_debug_info(...))
-        local checking_function = args[1] == 2 and args[2] == "f"
- 
-        if args[1] == 2 and args[2] == "sn" then
-            local fake_ret = table.pack(orig_debug_info(3, "sn"))
-            return table.unpack(fake_ret)
-        end
- 
-        if not checking_function then
-            return orig_debug_info(...)
-        end
- 
-        return cached_namecall_function
-    end)
- 
- 
-    local function safeHook(hookType, target, replacement)
-        local success, result = pcall(function()
-            if hookType == "function" then
-                return hookfunction(target, replacement)
-            elseif hookType == "metamethod" then
-                return hookmetamethod(target, "__namecall", replacement)
-            elseif hookType == "index" then
-                return hookmetamethod(target, "__index", replacement)
-            elseif hookType == "newindex" then
-                return hookmetamethod(target, "__newindex", replacement)
-            else
-                error("Unknown hook type: " .. tostring(hookType))
-            end
-        end)
- 
-        if not success then
-            handleError(ErrorCodes.HOOKING_ERROR)
-            return nil
-        end
- 
-        return result
-    end
- 
- 
-    for _, connection in next, getconnections(script_context.Error) do
-        pcall(connection.Disable, connection)
-    end
- 
- 
-    for _, value in next, getgc() do
-        if typeof(value) ~= "function" then
-            continue
-        end
- 
-        if iscclosure(value) then
-            continue
-        end
- 
-        local consts_success, consts_result = pcall(debug.getconstants, value)
-        if not consts_success or not consts_result or #consts_result ~= 1 then
-            continue
-        end
- 
-        local _, first_const = next(consts_result)
-        if first_const ~= 4000001 then
-            continue
-        end
- 
-        safeHook("function", value, function(...)
-            if shared.marked then
-                return
-            end
- 
-            if not shared.marked then
-                shared.marked = true
-            end
- 
-            return true
-        end)
-    end
- 
- 
-    orig_debug_info = safeHook("function", debug.info, newcclosure(on_debug_info))
-    if not orig_debug_info then return end
- 
-    orig_is_a = safeHook("function", is_a, newcclosure(on_is_a))
-    if not orig_is_a then return end
- 
-    orig_get_property_changed_signal = safeHook("function", game.GetPropertyChangedSignal, newcclosure(on_get_property_changed_signal))
-    if not orig_get_property_changed_signal then return end
- 
-    orig_preload_async = safeHook("function", content_provider.PreloadAsync, newcclosure(on_preload_async))
-    if not orig_preload_async then return end
- 
-    orig_log_service = safeHook("function", log_service.GetLogHistory, newcclosure(on_log_service))
-    if not orig_log_service then return end
- 
-    orig_game_namecall = safeHook("metamethod", game, newcclosure(on_game_namecall))
-    if not orig_game_namecall then return end
- 
-    orig_game_index = safeHook("index", game, newcclosure(on_game_index))
-    if not orig_game_index then return end
- 
-    orig_game_newindex = safeHook("newindex", game, newcclosure(on_game_newindex))
-    if not orig_game_newindex then return end
-]]
-	local fn, err = loadstring(src)
-	if not fn then
-		warn("[Methane] Bypass compile failed: ", err)
-		return
-	end
-	local ok, err2 = pcall(fn)
-	if not ok then
-		warn("[Methane] Bypass runtime: ", err2)
-	end
-end)
-
-task.wait(0.5)
-
---[[
   Methane | Football Fusion 3
-  MethaneUI | logo rbxassetid://72404794660074
-  Configs: MethaneUI/cfgs/ff3
+  Top AC bypass REMOVED — old hooks were interfering with ClientMain and
+  could contribute to suspicious-movement flags. Features run without
+  global metamethod hooks. ClientMain-aware movement gates remain below.
 ]]
 
 do
@@ -797,8 +35,9 @@ end
 
 pcall(function()
 	if not isfolder("MethaneUI") then makefolder("MethaneUI") end
-	if not isfolder("MethaneUI/cfgs") then makefolder("MethaneUI/cfgs") end
-	if not isfolder("MethaneUI/cfgs/ff3") then makefolder("MethaneUI/cfgs/ff3") end
+	if not isfolder("MethaneUI/methane") then makefolder("MethaneUI/methane") end
+	if not isfolder("MethaneUI/methane/cfgs") then makefolder("MethaneUI/methane/cfgs") end
+	if not isfolder("MethaneUI/methane/cfgs/ff3") then makefolder("MethaneUI/methane/cfgs/ff3") end
 end)
 
 local Players = game:GetService("Players")
@@ -955,7 +194,7 @@ getgenv().Library = Library
 -- SubPages under each (Player holds Physics + Defense)
 -- ============================================================================
 local Flags = {}
-local ConfigFolder = "MethaneUI/cfgs/ff3"
+local ConfigFolder = "MethaneUI/methane/cfgs/ff3"
 
 local function makeSub(page, subName, icon)
 	local sub = page:SubPage({
@@ -2912,7 +2151,7 @@ task.spawn(function()
 		if #catchParts == 0 then continue end
 
 		if method == 'CFrame' then
-			-- Find closest catch part to ball — not hardcoded to CatchL
+			-- Safer: do NOT set ball.CFrame (server-owned). Pull catch parts slightly + touch only.
 			local closestPart = nil
 			local closestDist = math.huge
 			for _, cp in ipairs(catchParts) do
@@ -2924,12 +2163,15 @@ task.spawn(function()
 			end
 
 			if closestPart and closestDist < range then
-				-- Snap ball to catch part with slight forward offset (glove pocket position)
-				local snapCFrame = closestPart.CFrame * CFrame.new(0, 0, -0.2)
 				pcall(function()
-					ball.CFrame = snapCFrame
+					-- micro-offset catch part toward ball (not ball toward player)
+					if closestDist > 0.5 then
+						local dir = (ball.Position - closestPart.Position)
+						if dir.Magnitude > 0 then
+							closestPart.CFrame = closestPart.CFrame + dir.Unit * math.min(0.35, closestDist * 0.25)
+						end
+					end
 				end)
-				-- Fire touch on ALL catch parts after snap — server picks up whichever registers first
 				pcall(function()
 					for _, cp in ipairs(catchParts) do
 						firetouchinterest(cp, ball, 0)
@@ -3130,6 +2372,47 @@ task.spawn(function()
     end
 end)
     
+
+-- ═══════════════════════════════════════════════════════════
+-- FF3 movement state (from ClientMain via CharacterSoundEvent)
+-- Legitimate WalkSpeeds: mode1=14, mode2=17, mode3=20, QB=19.87
+-- Never push horiz speed above current ClientMain WalkSpeed.
+-- ═══════════════════════════════════════════════════════════
+do
+    local RS = game:GetService("ReplicatedStorage")
+    getgenv()._FF3Move = getgenv()._FF3Move or {
+        canMove = true,
+        canChangeSpeed = true,
+        mode = 3,
+        lastWS = 20,
+        _spoofJumpY = 50,
+        _jumpUntil = 0,
+    }
+    local st = getgenv()._FF3Move
+    task.spawn(function()
+        local rem = RS:WaitForChild("Remotes", 15)
+        if not rem then return end
+        local ev = rem:WaitForChild("CharacterSoundEvent", 15)
+        if not ev then return end
+        ev.OnClientEvent:Connect(function(a, b, ...)
+            if a ~= "ClientMain" then return end
+            if b == "canMove" then
+                st.canMove = true
+            elseif b == "cantMove" then
+                st.canMove = false
+            elseif b == "canChangeSpeed" then
+                st.canChangeSpeed = true
+            elseif b == "cantChangeSpeed" then
+                st.canChangeSpeed = false
+            elseif b == "blockBegin" or b == "blockBegin2" or b == "blockBegin3" then
+                st.canChangeSpeed = false
+            elseif b == "blockEnd" or b == "blockEnd2" then
+                st.canChangeSpeed = true
+            end
+        end)
+    end)
+end
+
 PlayerTab:UseSection("Speed", 1)
 customWalkSpeed = PlayerTab:CreateToggle({
     Name = 'Enable',
@@ -3144,14 +2427,14 @@ walkSpeedValue = PlayerTab:CreateSlider({
     Default = 1,
     Increment = 1,
     Suffix = '',
-    Tip = 'Boost level 1-5. Normal mode caps at 23. CFrame mode caps at 15.',
+    Tip = 'Boost 1-5 fills toward ClientMain WalkSpeed (14/17/20). Does NOT overspeed. CFrame = risky.',
 })
 
 walkspeedType = PlayerTab:CreateDropdown({
     Name = 'boost type',
     Options = {'Normal', 'CFrame'},
     Default = 'Normal',
-    Tip = 'Normal = velocity write, max 23. CFrame = position step, max 15.',
+    Tip = 'Normal = soft velocity assist (recommended). CFrame = higher detect risk.',
 })
 
 do
@@ -3161,8 +2444,15 @@ do
     local function startCFLoop()
         if cfConn then cfConn:Disconnect() end
 
+        local _lastSpeedApply = 0
         cfConn = _RunService.Heartbeat:Connect(function(dt)
             if not customWalkSpeed.Value then return end
+
+            local st = rawget(getgenv(), "_FF3Move")
+            -- Respect ClientMain movement locks (block, cantMove, cantChangeSpeed)
+            if st then
+                if st.canMove == false or st.canChangeSpeed == false then return end
+            end
 
             local character = player.Character
             if not character then return end
@@ -3170,48 +2460,68 @@ do
             local humanoid = character:FindFirstChildOfClass("Humanoid")
             if not humanoid then return end
             if humanoid.PlatformStand then return end
-            if humanoid.WalkSpeed == 0 then return end
+            local assignedWS = humanoid.WalkSpeed
+            if assignedWS <= 0 then return end
 
             local root = character:FindFirstChild("HumanoidRootPart")
             if not root then return end
 
+            -- sanitize NaN (instant suspicious-movement flag)
+            local vel = root.AssemblyLinearVelocity
+            if vel.X ~= vel.X or vel.Y ~= vel.Y or vel.Z ~= vel.Z then
+                root.AssemblyLinearVelocity = Vector3.zero
+                return
+            end
+
             local direction = Vector3.new(humanoid.MoveDirection.X, 0, humanoid.MoveDirection.Z)
-            if direction.Magnitude <= 0 then return end
+            if direction.Magnitude <= 0.05 then return end
 
             local boost = math.clamp(tonumber(walkSpeedValue.Value) or 1, 1, 5)
             local isCF = walkspeedType.Value == "CFrame"
 
+            -- ClientMain legit caps: 14 / 17 / 20 / 19.87 — NEVER exceed assigned WalkSpeed
+            -- Soft boost only fills toward assignedWS (helps sticky movement), does not overspeed
+            local maxAllowed = math.min(assignedWS, 20)
+            -- tiny optional headroom only at boost 5 and only if assigned is full 20
+            if boost >= 5 and assignedWS >= 19.5 then
+                maxAllowed = math.min(assignedWS * 1.02, 20.2)
+            end
+
             if not isCF then
-                -- Normal: boost 1-5 maps to 20-23, velocity write
-                local speed = 20 + ((boost - 1) / 4) * 3
-                local velocity = direction.Unit * speed
-                root.AssemblyLinearVelocity = Vector3.new(
-                    velocity.X,
-                    root.AssemblyLinearVelocity.Y,
-                    velocity.Z
-                )
+                local now = tick()
+                if (now - _lastSpeedApply) < 0.06 then return end
+                _lastSpeedApply = now
+
+                local horiz = Vector3.new(vel.X, 0, vel.Z)
+                local curSpeed = horiz.Magnitude
+                if curSpeed >= maxAllowed * 0.97 then return end
+
+                local unit = direction.Unit
+                local target = maxAllowed * (0.85 + (boost - 1) / 4 * 0.15) -- boost1=85% … boost5=100% of allowed
+                target = math.min(target, maxAllowed)
+                local blend = 0.25
+                local desired = unit * target
+                local newHoriz = horiz:Lerp(desired, blend)
+                -- final clamp
+                if newHoriz.Magnitude > maxAllowed then
+                    newHoriz = newHoriz.Unit * maxAllowed
+                end
+                root.AssemblyLinearVelocity = Vector3.new(newHoriz.X, vel.Y, newHoriz.Z)
                 return
             end
 
-            -- CFrame: boost 1-5 maps to 11-15, heartbeat-synced position step
-            -- CFrame.new(step) preserves rotation — adding Vector3 directly zeros it every frame
-            local cfSpeedSPS = 11 + ((boost - 1) / 4) * 4
-            local step = direction.Unit * (cfSpeedSPS * dt)
+            -- CFrame mode remains high-risk; still hard-capped to assignedWS
+            local state = humanoid:GetState()
+            if state ~= Enum.HumanoidStateType.Running
+                and state ~= Enum.HumanoidStateType.RunningNoPhysics then
+                return
+            end
+            local cfSpeedSPS = math.min(maxAllowed * (0.7 + (boost - 1) / 4 * 0.25), maxAllowed)
+            local step = direction.Unit * (cfSpeedSPS * math.min(dt, 1/30))
+            if step.Magnitude < 1e-4 then return end
             root.CFrame = root.CFrame * CFrame.new(
                 root.CFrame:VectorToObjectSpace(step)
             )
-
-            if humanoid:GetState() == Enum.HumanoidStateType.Running then
-                local scale = cfSpeedSPS / math.max(humanoid.WalkSpeed, 1)
-                if math.abs(scale - 1) > 0.05 then
-                    local animator = humanoid:FindFirstChildOfClass("Animator")
-                    if animator then
-                        for _, track in next, animator:GetPlayingAnimationTracks() do
-                            pcall(track.AdjustSpeed, track, scale)
-                        end
-                    end
-                end
-            end
         end)
     end
 
@@ -3236,35 +2546,52 @@ jumpPowerValue = PlayerTab:CreateSlider({
     Default = 50,
     Increment = 0.1,
     Suffix = '',
-    Tip = 'Sets the custom jump power.',
+    Tip = 'Jump Y velocity up to 70. Client reads are spoofed; very high jumps can still flag server movement.',
 })
 
-task.spawn(function()
-    while true do
-        task.wait()
+-- ConsHub-style jump: Humanoid.Jumping signal + ADD (power-50), not every-frame force
+do
+    local jumpSettings = { enabled = false, power = 50 }
 
-        if not customJumpPower.Value then continue end
-        local character = player.Character
-        if not character then continue end
+    -- keep in sync with UI
+    task.spawn(function()
+        while true do
+            task.wait(0.1)
+            jumpSettings.enabled = customJumpPower.Value == true
+            jumpSettings.power = math.clamp(tonumber(jumpPowerValue.Value) or 50, 50, 70)
+        end
+    end)
 
-        local humanoid = character:FindFirstChildOfClass('Humanoid')
-        if not humanoid then continue end
+    local function onCharacterMovement(character)
+        local humanoid = character:WaitForChild("Humanoid", 8)
+        local root = character:WaitForChild("HumanoidRootPart", 8)
+        if not humanoid or not root then return end
 
-        local root = character:FindFirstChild('HumanoidRootPart')
-        if not root then continue end
-
-        if humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then continue end
-        
-        task.wait()
-        root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, jumpPowerValue.Value, root.AssemblyLinearVelocity.Z)
+        humanoid.Jumping:Connect(function()
+            if not jumpSettings.enabled then return end
+            if humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then return end
+            task.wait(0.05)
+            if not root.Parent then return end
+            -- ADD delta over default ~50 (ConsHub). Never absolute force every frame.
+            local extra = jumpSettings.power - 50
+            if extra > 0 then
+                root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + Vector3.new(0, extra, 0)
+            end
+        end)
     end
-end)
+
+    if player.Character then
+        task.spawn(onCharacterMovement, player.Character)
+    end
+    player.CharacterAdded:Connect(onCharacterMovement)
+end
+
     
 PlayerTab:UseSection("Angle Enhancer", 1)
 angleEnhancer = PlayerTab:CreateToggle({
     Name = 'Enable',
     Default = false,
-    Tip = 'Boosts jump height when directional look changes while jumping.',
+    Tip = 'ConsHub style: flick shift-lock OFF then jump within Max jump time for boost.',
 })
 
 angleEnhancerIndicator = PlayerTab:CreateToggle({
@@ -3288,68 +2615,91 @@ angleEnhanceBoost = PlayerTab:CreateSlider({
     Suffix = '',
     Tip = 'Sets the vertical velocity applied during angle boost.',
 })
+
+angleEnhanceWindow = PlayerTab:CreateSlider({
+    Name = 'Max jump time',
+    Min = 0.05,
+    Max = 1,
+    Default = 0.25,
+    Increment = 0.05,
+    Suffix = 's',
+    Tip = 'How long after shift-lock OFF the boost still arms a jump.',
+})
     
-local lastTick = 0
-local oldLookVector = nil
+-- ConsHub angle enhancer 1:1
+-- Arm boost by toggling shift-lock OFF, then jump within 0.2s
+local angleTick = os.clock()
+local shiftLockEnabled = false
+local lastEnabled = false
+local angleEnhancerPower = 50
+
+-- keep power synced from UI slider
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        angleEnhancerPower = math.clamp(tonumber(angleEnhanceBoost.Value) or 50, 50, 70)
+    end
+end)
+
+local function hookAngleCharacter(character)
+    local humanoid = character:WaitForChild("Humanoid", 8)
+    local hrp = character:WaitForChild("HumanoidRootPart", 8)
+    if not humanoid or not hrp then return end
+
+    humanoid.Jumping:Connect(function()
+        if not angleEnhancer.Value then return end
+        if humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then return end
+        local window = 0.25
+        pcall(function()
+            window = math.clamp(tonumber(angleEnhanceWindow.Value) or 0.25, 0.05, 1)
+        end)
+        if os.clock() - angleTick > window then return end
+        task.wait(0.05)
+        if not hrp.Parent then return end
+        local extra = angleEnhancerPower - 50
+        if extra > 0 then
+            hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + Vector3.new(0, extra, 0)
+        end
+        if angleEnhancerIndicator.Value then
+            local hint = Instance.new("Hint")
+            hint.Text = "Angled!"
+            hint.Parent = workspace.Terrain
+            task.delay(1.2, function()
+                if hint and hint.Parent then hint:Destroy() end
+            end)
+        end
+    end)
+end
+
+if player.Character then
+    task.spawn(hookAngleCharacter, player.Character)
+end
+player.CharacterAdded:Connect(hookAngleCharacter)
+
+pcall(function()
+    userInputService:GetPropertyChangedSignal("MouseBehavior"):Connect(function()
+        shiftLockEnabled = (userInputService.MouseBehavior == Enum.MouseBehavior.LockCenter)
+    end)
+    shiftLockEnabled = (userInputService.MouseBehavior == Enum.MouseBehavior.LockCenter)
+end)
 
 task.spawn(function()
     while true do
         task.wait()
-
-        if not angleEnhancer.Value then continue end
-
         local character = player.Character
-        if not character then oldLookVector = nil continue end
+        if not character then continue end
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not hrp or not humanoid then continue end
 
-        local humanoid = character:FindFirstChildOfClass('Humanoid')
-        local hrp = character:FindFirstChild('HumanoidRootPart')
-        if not humanoid or not hrp then oldLookVector = nil continue end
-
-        if humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then
-            continue
+        -- ConsHub: when shift-lock turns OFF, arm the next jump
+        if not shiftLockEnabled and lastEnabled then
+            angleTick = os.clock()
         end
-
-        local currentTime = tick()
-        local newLookVector = hrp.CFrame.LookVector
-
-        if not oldLookVector then
-            oldLookVector = newLookVector
-            lastTick = currentTime
-            continue
-        end
-
-        local angleChange = math.acos(math.clamp(oldLookVector:Dot(newLookVector), -1, 1))
-        local shiftLockEnabled = userInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
-
-        if currentTime - lastTick >= 0.2 and angleChange > math.rad(5) then
-            lastTick = currentTime
-            oldLookVector = newLookVector
-        end
-
-        if angleChange > math.rad(25) and currentTime - lastTick <= 2.5 then
-            lastTick = currentTime
-            oldLookVector = newLookVector
-
-            task.wait()
-
-            local vel = hrp.AssemblyLinearVelocity
-            hrp.AssemblyLinearVelocity = Vector3.new(vel.X, angleEnhanceBoost.Value, vel.Z)
-
-            if angleEnhancerIndicator.Value and (shiftLockEnabled or true) then
-                local hint = Instance.new('Hint')
-                hint.Text = 'Angled!'
-                hint.Parent = workspace.Terrain
-
-                task.delay(2.5, function()
-                    if hint then
-                        hint:Destroy()
-                    end
-                end)
-            end
-        end
+        lastEnabled = shiftLockEnabled
     end
 end)
-    
+
 local runtime, jumptime, hittime = 0, 0, 0
 local arm, vLine, used, prevPs = false, nil, false, false
 local seq = 0
@@ -4215,6 +3565,61 @@ fpsBoost = VisualTab:CreateToggle({
     Default = false,
     Tip = 'Sets materials to Plastic for higher FPS.',
 })
+
+footballHighlight = VisualTab:CreateToggle({
+    Name = 'Football Highlight',
+    Default = false,
+    Tip = 'Outline highlight on football parts (ConsHub).',
+})
+
+-- Football highlight
+do
+    local function ensureHL(part)
+        if not part or not part:IsA("BasePart") then return end
+        if part:FindFirstChild("MethaneFootballHL") then return end
+        local hl = Instance.new("Highlight")
+        hl.Name = "MethaneFootballHL"
+        hl.FillTransparency = 1
+        hl.OutlineTransparency = 0
+        hl.OutlineColor = Color3.fromRGB(0, 200, 255)
+        hl.Adornee = part
+        hl.Parent = part
+    end
+    task.spawn(function()
+        while true do
+            task.wait(0.35)
+            if not footballHighlight.Value then
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    if obj:IsA("Highlight") and obj.Name == "MethaneFootballHL" then
+                        pcall(function() obj:Destroy() end)
+                    end
+                end
+                continue
+            end
+            for _, obj in ipairs(workspace:GetChildren()) do
+                if obj.Name == "Football" and obj:IsA("BasePart") then
+                    ensureHL(obj)
+                elseif obj:IsA("Tool") and obj.Name == "Football" then
+                    local h = obj:FindFirstChildWhichIsA("BasePart")
+                    if h then ensureHL(h) end
+                end
+            end
+            for _, plr in ipairs(players:GetPlayers()) do
+                local char = plr.Character
+                if not char then continue end
+                local fb = char:FindFirstChild("Football")
+                if fb then
+                    if fb:IsA("BasePart") then ensureHL(fb)
+                    else
+                        local p = fb:FindFirstChildWhichIsA("BasePart")
+                        if p then ensureHL(p) end
+                    end
+                end
+            end
+        end
+    end)
+end
+
 local _fpsMatCache = {}
 local _fpsApplied = false
 task.spawn(function()
@@ -4431,7 +3836,13 @@ DefenseTab:UseSection("Auto Rush", 1)
 autoRush = DefenseTab:CreateToggle({
     Name = 'Auto Rush',
     Default = false,
-    Tip = 'Automatically moves toward the opposing ball carrier in range.',
+    Tip = 'ConsHub-style rush toward enemy ball carrier.',
+})
+
+autoRushPredict = DefenseTab:CreateToggle({
+    Name = 'Prediction',
+    Default = true,
+    Tip = 'Lead the carrier with MoveDirection prediction + beam.',
 })
 
 walkToLine = DefenseTab:CreateToggle({
@@ -4444,81 +3855,164 @@ autoRushReactionTime = DefenseTab:CreateSlider({
     Name = 'Reaction Time',
     Min = 0,
     Max = 1,
-    Default = 0.15,
-    Increment = 0.01,
-    Suffix = '',
-    Tip = 'Adjusts how quickly the feature responds.',
+    Default = 0.3,
+    Increment = 0.05,
+    Suffix = 's',
+    Tip = 'Position history delay used for prediction (ConsHub).',
 })
 
-task.spawn(function()
-    while true do
-        task.wait()
+do
+    local rushLine, rushStart, rushEnd, endPart
 
-        if not autoRush.Value then continue end
+    local function isEnemy(plr)
+        if not player.Team or not plr.Team then return true end
+        return plr.Team ~= player.Team
+    end
 
-        local character = player.Character
-        if not character then continue end
-
-        local humanoid = character:FindFirstChildOfClass('Humanoid')
-        if not humanoid then continue end
-
-        local hrp = character:FindFirstChild('HumanoidRootPart')
-        if not hrp then continue end
-
-        if walkToLine.Value then
-            if replicatedStorage:FindFirstChild('Flags')
-                and replicatedStorage.Flags:FindFirstChild('PossessionTag')
-                and replicatedStorage.Flags:FindFirstChild('Status')
-                and replicatedStorage.Flags.PossessionTag.Value ~= player.Team.Name
-                and replicatedStorage.Flags.Status.Value == 'PrePlay' then
-
-                local line = workspace:FindFirstChild('LineDown')
-                if line then
-                    humanoid:MoveTo(line.Position)
+    local function findPossessor()
+        for _, plr in ipairs(players:GetPlayers()) do
+            local char = plr.Character
+            if char and isEnemy(plr) then
+                if char:FindFirstChild("Football") or char:FindFirstChildWhichIsA("Tool") then
+                    local tool = char:FindFirstChild("Football") or char:FindFirstChildWhichIsA("Tool")
+                    if tool and (tool.Name == "Football" or tool:IsA("Tool")) then
+                        if tool.Name == "Football" or (tool:IsA("Tool") and tool.Name:lower():find("foot")) then
+                            return char
+                        end
+                    end
+                    if char:FindFirstChild("Football") then
+                        return char
+                    end
                 end
             end
         end
-
-        for _, v in next, players:GetPlayers() do
-            if v == player then continue end
-            if v.Team == player.Team then continue end
-            if not v.Character then continue end
-
-            local enemyChar = v.Character
-            local enemyHumanoid = enemyChar:FindFirstChildOfClass('Humanoid')
-            local enemyHrp = enemyChar:FindFirstChild('HumanoidRootPart')
-            if not enemyHumanoid or not enemyHrp then continue end
-
-            local football = enemyChar:FindFirstChild('Football')
-            if not football then continue end
-
-            local footballPart = football:FindFirstChildWhichIsA('BasePart')
-            if not footballPart then continue end
-
-            if enemyHumanoid.WalkSpeed <= 0 then continue end
-            if enemyHumanoid.PlatformStand then continue end
-
-            local ping = 0
-            if stats and stats:FindFirstChild('Network') 
-                and stats.Network:FindFirstChild('ServerStatsItem')
-                and stats.Network.ServerStatsItem:FindFirstChild('Data Ping') then
-                ping = stats.Network.ServerStatsItem['Data Ping']:GetValue() / 1000
+        -- fallback: any enemy with Football child
+        for _, plr in ipairs(players:GetPlayers()) do
+            local char = plr.Character
+            if char and isEnemy(plr) and char:FindFirstChild("Football") then
+                return char
             end
-
-            local speed = enemyHumanoid.MoveDirection.Magnitude > 0 and enemyHumanoid.WalkSpeed or 0
-            local predictionTime = ping + autoRushReactionTime.Value
-
-            local pos = footballPart.Position + (enemyHumanoid.MoveDirection * speed * predictionTime * 20)
-
-            local direction = pos - enemyHrp.Position
-            if direction.Magnitude > 0 then
-                pos += direction.Unit * ((hrp.Position - pos).Magnitude / 20)
-            end
-
-            humanoid:MoveTo(pos)
         end
+        return nil
     end
-end)
+
+    local function createPredictionLine()
+        if rushLine then pcall(function() rushLine:Destroy() end) end
+        if endPart then pcall(function() endPart:Destroy() end) end
+
+        local part = Instance.new("Part")
+        part.Anchored = true
+        part.CanCollide = false
+        part.Transparency = 1
+        part.Size = Vector3.new(0.5, 0.5, 0.5)
+        part.Name = "MethaneRushLine"
+
+        local a1 = Instance.new("Attachment")
+        a1.Parent = part
+        local a2 = Instance.new("Attachment")
+        a2.Parent = part
+
+        local beam = Instance.new("Beam")
+        beam.Attachment0 = a1
+        beam.Attachment1 = a2
+        beam.Color = ColorSequence.new(Color3.fromRGB(0, 255, 255))
+        beam.Width0 = 0.4
+        beam.Width1 = 0.4
+        beam.FaceCamera = true
+        beam.LightInfluence = 0
+        beam.Transparency = NumberSequence.new(0)
+        beam.Parent = a1
+
+        part.Parent = workspace
+        rushLine, rushStart, rushEnd = part, a1, a2
+
+        endPart = Instance.new("Part")
+        endPart.Anchored = true
+        endPart.CanCollide = false
+        endPart.Size = Vector3.new(2, 2, 2)
+        endPart.Transparency = 0.3
+        endPart.Color = Color3.fromRGB(0, 255, 255)
+        endPart.Material = Enum.Material.Neon
+        endPart.Name = "MethaneRushEnd"
+        endPart.Parent = workspace
+    end
+
+    task.spawn(function()
+        local log = {}
+        while true do
+            task.wait(1 / 30)
+
+            if not autoRush.Value then
+                log = {}
+                if rushLine then rushLine.Parent = nil end
+                if endPart then endPart.Parent = nil end
+                continue
+            end
+
+            local character = player.Character
+            if not character then continue end
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            local hum = character:FindFirstChildOfClass("Humanoid")
+            if not hrp or not hum then continue end
+
+            -- Walk to line (kept)
+            if walkToLine.Value then
+                local flags = replicatedStorage:FindFirstChild("Flags")
+                if flags and flags:FindFirstChild("PossessionTag") and flags:FindFirstChild("Status") then
+                    if flags.PossessionTag.Value ~= player.Team.Name and flags.Status.Value == "PrePlay" then
+                        local line = workspace:FindFirstChild("LineDown")
+                        if line then
+                            hum:MoveTo(line.Position)
+                        end
+                    end
+                end
+            end
+
+            local possessor = findPossessor()
+            if not possessor then
+                log = {}
+                if rushLine then rushLine.Parent = nil end
+                if endPart then endPart.Parent = nil end
+                continue
+            end
+
+            local possHRP = possessor:FindFirstChild("HumanoidRootPart")
+            local possHum = possessor:FindFirstChildOfClass("Humanoid")
+            if not possHRP then continue end
+
+            local delay = math.clamp(tonumber(autoRushReactionTime.Value) or 0.3, 0, 1)
+            local logIndex = math.max(#log - math.round(delay / (1 / 30)), 1)
+            local delayedPos = log[logIndex]
+            table.insert(log, possHRP.Position)
+            if #log > 90 then table.remove(log, 1) end
+
+            if not delayedPos then continue end
+
+            local moveDir = Vector3.zero
+            if possHum then moveDir = possHum.MoveDirection end
+            local predictedPos = delayedPos + (moveDir * 20 * delay)
+
+            if autoRushPredict.Value then
+                hum:MoveTo(predictedPos)
+                if not rushLine then createPredictionLine() end
+                if rushLine then
+                    rushLine.Position = predictedPos
+                    rushStart.WorldPosition = hrp.Position
+                    rushEnd.WorldPosition = predictedPos
+                    rushLine.Parent = workspace
+                end
+                if endPart then
+                    endPart.Position = predictedPos
+                    endPart.Parent = workspace
+                end
+            else
+                hum:MoveTo(delayedPos)
+                if rushLine then rushLine.Parent = nil end
+                if endPart then endPart.Parent = nil end
+            end
+        end
+    end)
+end
 
 CatchingTab:UseSection("Auto Catch", 1)
 autoCatch = CatchingTab:CreateToggle({
@@ -4553,6 +4047,8 @@ autoSwatRadius = DefenseTab:CreateSlider({
     Suffix = '',
     Tip = 'Sets how far the auto swat detection can reach.',
 })
+
+
 
 task.spawn(function()
     while true do
@@ -4614,6 +4110,46 @@ task.spawn(function()
     end
 end)
     
+CatchingTab:UseSection("Auto Reset", 1)
+autoReset = CatchingTab:CreateToggle({
+    Name = 'Enable',
+    Default = false,
+    Tip = 'Breaks character after catching the football (ConsHub).',
+})
+
+autoResetDelay = CatchingTab:CreateSlider({
+    Name = 'Reset Delay',
+    Min = 0,
+    Max = 2,
+    Default = 1,
+    Increment = 0.1,
+    Suffix = 's',
+    Tip = 'Delay after possessing the ball before reset.',
+})
+
+do
+    local _resetLock = false
+    task.spawn(function()
+        while true do
+            task.wait(0.1)
+            if not autoReset.Value then _resetLock = false continue end
+            local char = player.Character
+            if not char or _resetLock then continue end
+            local tool = char:FindFirstChild("Football") or char:FindFirstChildOfClass("Tool")
+            if tool and tool.Name == "Football" then
+                _resetLock = true
+                local delay = math.clamp(tonumber(autoResetDelay.Value) or 1, 0, 2)
+                task.wait(delay)
+                if autoReset.Value and char.Parent then
+                    pcall(function() char:BreakJoints() end)
+                end
+                task.wait(1)
+                _resetLock = false
+            end
+        end
+    end)
+end
+
 CatchingTab:UseSection("Freeze Tech", 2)
 autoFreeze = CatchingTab:CreateToggle({
     Name = 'Enable',
@@ -4646,6 +4182,7 @@ freezeKeybind = CatchingTab:CreateKeybind({
 
 do
     local _freezeActive = false
+    local _keyFreezeConn = nil
 
     -- Auto mode: hook catch remote
     local _catchRemote = nil
@@ -4663,11 +4200,18 @@ do
         if not hrp then return end
         if _freezeActive then return end
         _freezeActive = true
-        hrp.Anchored = true
-        local dur = tonumber(freezeDuration.Value) or 0
-        task.delay(math.max(dur, 0.05), function()
-            if hrp and hrp.Parent then hrp.Anchored = false end
-            _freezeActive = false
+        -- Do NOT use Anchored (server flags it). Soft-hold: zero horiz velocity briefly.
+        local dur = math.clamp(tonumber(freezeDuration.Value) or 0.15, 0.05, 0.6)
+        local holdUntil = tick() + dur
+        local conn
+        conn = game:GetService("RunService").Heartbeat:Connect(function()
+            if not hrp or not hrp.Parent or tick() > holdUntil then
+                if conn then conn:Disconnect() end
+                _freezeActive = false
+                return
+            end
+            local v = hrp.AssemblyLinearVelocity
+            hrp.AssemblyLinearVelocity = Vector3.new(v.X * 0.15, math.min(v.Y, 0), v.Z * 0.15)
         end)
     end
 
@@ -4704,7 +4248,17 @@ do
         local hrp = character:FindFirstChild('HumanoidRootPart')
         if not hrp then return end
         _freezeActive = true
-        hrp.Anchored = true
+        -- soft freeze without Anchored
+        if not _keyFreezeConn then
+            _keyFreezeConn = game:GetService("RunService").Heartbeat:Connect(function()
+                if not _freezeActive then return end
+                local c = player.Character
+                local r = c and c:FindFirstChild('HumanoidRootPart')
+                if not r then return end
+                local v = r.AssemblyLinearVelocity
+                r.AssemblyLinearVelocity = Vector3.new(v.X * 0.1, math.min(v.Y, 0), v.Z * 0.1)
+            end)
+        end
     end)
 
     userInputService.InputEnded:Connect(function(input)
@@ -4713,19 +4267,11 @@ do
         local key = freezeKeybind.Value
         if not key then return end
         if input.KeyCode ~= key then return end
-
-        local character = player.Character
-        if not character then return end
-        local hrp = character:FindFirstChild('HumanoidRootPart')
-        if hrp and hrp.Parent then hrp.Anchored = false end
         _freezeActive = false
     end)
 
-    -- Safety: unanchor on character respawn
     player.CharacterAdded:Connect(function(char)
         _freezeActive = false
-        local hrp = char:WaitForChild('HumanoidRootPart', 5)
-        if hrp then hrp.Anchored = false end
     end)
 end
 
@@ -4738,9 +4284,9 @@ autoQb = AutomaticsTab:CreateToggle({
 
 autoQbMethod = AutomaticsTab:CreateDropdown({
     Name = 'Auto QB Method',
-    Options = {'Walk', 'Teleport'},
+    Options = {'Walk'},
     Default = 'Walk',
-    Tip = 'Selects how automatic positioning is performed.',
+    Tip = 'Walk only — teleport method removed (flagged as suspicious movement).',
 })
 
 task.spawn(function()
@@ -4765,11 +4311,8 @@ task.spawn(function()
             and replicatedStorage.Flags.PossessionTag.Value == player.Team.Name
             and replicatedStorage.Flags.Status.Value == 'PrePlay' then
 
-            if autoQbMethod.Value == 'Walk' then
-                humanoid:MoveTo(ball.Position)
-            elseif autoQbMethod.Value == 'Teleport' then
-                humanoidRootPart.CFrame = ball.CFrame
-            end
+            -- Teleport disabled (suspicious movement). Always walk.
+            humanoid:MoveTo(ball.Position)
         else
             pcall(function()
                 ball.CFrame = humanoidRootPart.CFrame
@@ -4794,11 +4337,11 @@ targetClosestPlayer = CatchingTab:CreateToggle({
 boostStrength = CatchingTab:CreateSlider({
     Name = 'Strength',
     Min = 0,
-    Max = 3,
-    Default = 1.5,
+    Max = 2,
+    Default = 0.8,
     Increment = 0.1,
     Suffix = '',
-    Tip = 'Adjusts the strength of the boost effect.',
+    Tip = 'Keep low — strong mid-air CFrame tweens get movement flagged.',
 })
 
 boostRadius = CatchingTab:CreateSlider({
@@ -4814,11 +4357,11 @@ boostRadius = CatchingTab:CreateSlider({
 boostPower = CatchingTab:CreateSlider({
     Name = 'Power',
     Min = 50,
-    Max = 70,
+    Max = 60,
     Default = 50,
     Increment = 0.1,
     Suffix = '',
-    Tip = 'Controls the upward force applied during a boost.',
+    Tip = 'Upward force after boost. Stay near 50 to avoid velocity flags.',
 })
 
 task.spawn(function()
@@ -5064,7 +4607,8 @@ if not isPractice then
 		while true do
 			task.wait()
 
-			local replayScript = player.PlayerScripts:FindFirstChild('ClientReplay')
+			local _ps = player:FindFirstChild('PlayerScripts')
+			local replayScript = _ps and _ps:FindFirstChild('ClientReplay')
 			if replayScript then
 				replayScript.Enabled = not smoothReplay.Value
 			end
